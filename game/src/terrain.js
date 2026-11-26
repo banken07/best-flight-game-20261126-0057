@@ -228,6 +228,22 @@ export function buildIsland(seed) {
       lights[k + 2] = l[2];
     }
   }
+  // Per-vertex base colour: the old code coloured each triangle from its
+  // centroid height, so adjacent triangles stepped in colour even though
+  // the LIGHT was smooth. Averaging the three corner vertex colours in the
+  // triangle loop below removes the colour banding on steep slopes.
+  const vcolors = new Float64Array((N + 1) * (N + 1) * 3);
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const k = (j * (N + 1) + i) * 3;
+      const x = min + i * step, y = min + j * step;
+      const h = heights[j * (N + 1) + i];
+      const rgb = hexToRgb(terrainColorSmooth(h, Math.hypot(x, y), x, y, seed));
+      vcolors[k] = rgb[0] / 255;
+      vcolors[k + 1] = rgb[1] / 255;
+      vcolors[k + 2] = rgb[2] / 255;
+    }
+  }
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const x0 = min + i * step, x1 = x0 + step;
@@ -249,17 +265,14 @@ export function buildIsland(seed) {
         const ccx = (t[0][0] + t[1][0] + t[2][0]) / 3;
         const ccy = (t[0][1] + t[1][1] + t[2][1]) / 3;
         if (t[0][2] <= 0.5 && t[1][2] <= 0.5 && t[2][2] <= 0.5 && Math.hypot(ccx, ccy) > 1100) continue;
-        const cx = (t[0][0] + t[1][0] + t[2][0]) / 3;
-        const cy = (t[0][1] + t[1][1] + t[2][1]) / 3;
-        const cz = (t[0][2] + t[1][2] + t[2][2]) / 3;
-        const r = Math.hypot(cx, cy);
-        const base = terrainColorSmooth(cz, r, cx, cy, seed);
         const ia = idx[q][0] * 3, ib = idx[q][1] * 3, ic = idx[q][2] * 3;
         const lr = (lights[ia] + lights[ib] + lights[ic]) / 3;
         const lg = (lights[ia + 1] + lights[ib + 1] + lights[ic + 1]) / 3;
         const lb = (lights[ia + 2] + lights[ib + 2] + lights[ic + 2]) / 3;
-        const rgb = hexToRgb(base);
-        const col = rgbToHex(rgb[0] * lr, rgb[1] * lg, rgb[2] * lb);
+        const cr = (vcolors[ia] + vcolors[ib] + vcolors[ic]) / 3;
+        const cg = (vcolors[ia + 1] + vcolors[ib + 1] + vcolors[ic + 1]) / 3;
+        const cb = (vcolors[ia + 2] + vcolors[ib + 2] + vcolors[ic + 2]) / 3;
+        const col = rgbToHex(cr * lr * 255, cg * lg * 255, cb * lb * 255);
         tris.push({ pts: [t[0], t[1], t[2]], color: col });
       }
     }
@@ -267,7 +280,7 @@ export function buildIsland(seed) {
   const rng = mulberry32(seed + 11);
   const trees = [];
   let guard = 0;
-  while (trees.length < 70 && guard < 5000) {
+  while (trees.length < 90 && guard < 5000) {
     guard++;
     const x = (rng() * 2 - 1) * 950;
     const y = (rng() * 2 - 1) * 950;
@@ -283,6 +296,44 @@ export function buildIsland(seed) {
     if (!ok) continue;
     trees.push({ x, y, z: h, s: 8 + rng() * 8 });
   }
+  // Scattered stylised rocks on the hillsides (two-pyramid clusters).
+  const rocks = [];
+  guard = 0;
+  while (rocks.length < 48 && guard < 5000) {
+    guard++;
+    const x = (rng() * 2 - 1) * 950;
+    const y = (rng() * 2 - 1) * 950;
+    const r = Math.hypot(x, y);
+    if (r >= 950) continue;
+    const h = heightAt(x, y, seed);
+    if (h < 12 || h > 130) continue;
+    if (Math.abs(x) < 110 && y > -1600 && y < 300) continue;
+    let ok = true;
+    for (let k = 0; k < HUT_SPOTS.length; k++) {
+      if (Math.hypot(x - HUT_SPOTS[k].x, y - HUT_SPOTS[k].y) < 120) { ok = false; break; }
+    }
+    if (!ok) continue;
+    rocks.push({ x, y, z: h, s: 3 + rng() * 6, rot: rng() * Math.PI, tone: 0.85 + rng() * 0.3 });
+  }
+  // Low bushes along the valley edges and hillsides (squat wide pyramids).
+  const bushes = [];
+  guard = 0;
+  while (bushes.length < 60 && guard < 5000) {
+    guard++;
+    const x = (rng() * 2 - 1) * 950;
+    const y = (rng() * 2 - 1) * 950;
+    const r = Math.hypot(x, y);
+    if (r >= 950) continue;
+    const h = heightAt(x, y, seed);
+    if (h < 5 || h > 90) continue;
+    if (Math.abs(x) < 100 && y > -1600 && y < 300) continue;
+    let ok = true;
+    for (let k = 0; k < HUT_SPOTS.length; k++) {
+      if (Math.hypot(x - HUT_SPOTS[k].x, y - HUT_SPOTS[k].y) < 80) { ok = false; break; }
+    }
+    if (!ok) continue;
+    bushes.push({ x, y, z: h, s: 4 + rng() * 5, rot: rng() * Math.PI });
+  }
   const clouds = [];
   for (let i = 0; i < 10; i++) {
     clouds.push({
@@ -294,7 +345,7 @@ export function buildIsland(seed) {
   }
   const huts = HUT_SPOTS.map(p => ({ x: p.x, y: p.y, z: heightAt(p.x, p.y, seed) }));
   const runway = { x0: -30, x1: 30, y0: -300, y1: 300, z: 2 };
-  return { seed, tris, trees, clouds, huts, runway };
+  return { seed, tris, trees, rocks, bushes, clouds, huts, runway };
 }
 
 function pushTri(out, a, b, c, color) {
@@ -328,7 +379,7 @@ export function collectIslandTris(island, cam, out) {
     const tr = trees[i];
     if (!tr) continue;
     const dx = tr.x - ex, dy = tr.y - ey, dz = tr.z - ez;
-    if (Math.hypot(dx, dy, dz) > 4000) continue;
+    if (Math.hypot(dx, dy, dz) > 2500) continue;
     const s = tr.s || 8;
     const apex = [tr.x, tr.y, tr.z + s * 2.4];
     const baseZ = tr.z + s * 0.4;
@@ -345,6 +396,55 @@ export function collectIslandTris(island, cam, out) {
     pushQuad(out,
       [tr.x - 1, tr.y, tz0], [tr.x + 1, tr.y, tz0],
       [tr.x + 1, tr.y, tz1], [tr.x - 1, tr.y, tz1], "#5a4632");
+  }
+  // Rocks: two-pyramid clusters, faceted on purpose (reads as stone).
+  const rocks = island.rocks || [];
+  for (let i = 0; i < rocks.length; i++) {
+    const rk = rocks[i];
+    if (!rk) continue;
+    if (Math.hypot(rk.x - ex, rk.y - ey, rk.z - ez) > 2500) continue;
+    const s = rk.s || 4;
+    const c = Math.cos(rk.rot || 0), sn = Math.sin(rk.rot || 0);
+    const tone = rk.tone || 1;
+    const col = shadeHex("#6f6a5e", tone);
+    const col2 = shadeHex("#7d7668", tone);
+    const apex = [rk.x, rk.y, rk.z + s * 1.1];
+    const base = [];
+    for (let k = 0; k < 4; k++) {
+      const a = (rk.rot || 0) + k * Math.PI / 2;
+      base.push([rk.x + Math.cos(a) * s, rk.y + Math.sin(a) * s, rk.z]);
+    }
+    for (let k = 0; k < 4; k++) {
+      pushTri(out, apex, base[k], base[(k + 1) % 4], k % 2 ? col : col2);
+    }
+    // smaller satellite rock
+    const ox = rk.x + c * s * 1.1, oy = rk.y + sn * s * 1.1;
+    const apex2 = [ox, oy, rk.z + s * 0.6];
+    const base2 = [];
+    for (let k = 0; k < 4; k++) {
+      const a = (rk.rot || 0) + k * Math.PI / 2 + 0.4;
+      base2.push([ox + Math.cos(a) * s * 0.55, oy + Math.sin(a) * s * 0.55, rk.z]);
+    }
+    for (let k = 0; k < 4; k++) {
+      pushTri(out, apex2, base2[k], base2[(k + 1) % 4], col);
+    }
+  }
+  // Bushes: squat wide pyramids, darker green than the trees.
+  const bushes = island.bushes || [];
+  for (let i = 0; i < bushes.length; i++) {
+    const bu = bushes[i];
+    if (!bu) continue;
+    if (Math.hypot(bu.x - ex, bu.y - ey, bu.z - ez) > 2500) continue;
+    const s = bu.s || 5;
+    const apex = [bu.x, bu.y, bu.z + s * 0.9];
+    const base = [];
+    for (let k = 0; k < 4; k++) {
+      const a = (bu.rot || 0) + k * Math.PI / 2;
+      base.push([bu.x + Math.cos(a) * s * 1.4, bu.y + Math.sin(a) * s * 1.4, bu.z]);
+    }
+    for (let k = 0; k < 4; k++) {
+      pushTri(out, apex, base[k], base[(k + 1) % 4], k % 2 ? "#2a5c2e" : "#356b33");
+    }
   }
   const huts = island.huts || [];
   for (let i = 0; i < huts.length; i++) {
@@ -365,6 +465,49 @@ export function collectIslandTris(island, cam, out) {
     pushTri(out, [x1, y1, z1], [x0, y1, z1], apex, "#a85a32");
     pushTri(out, [x1, y0, z1], [x1, y1, z1], apex, "#a85a32");
     pushTri(out, [x0, y1, z1], [x0, y0, z1], apex, "#a85a32");
+  }
+}
+
+// Grounded supply pads at the two huts: a packed-dirt disc with a white
+// "H" marking, drawn in the terrain pass so it sits on the ground. When a
+// zone is supplied (doneArr[i]), a crate box appears on the pad.
+export function collectPadTris(island, cam, out, doneArr) {
+  if (!island || !cam || !out) return;
+  const ex = cam.ex || 0, ey = cam.ey || 0, ez = cam.ez || 0;
+  const huts = island.huts || [];
+  for (let i = 0; i < huts.length; i++) {
+    const hu = huts[i];
+    if (!hu) continue;
+    if (Math.hypot(hu.x - ex, hu.y - ey, hu.z - ez) > 4000) continue;
+    const z = hu.z + 0.4;
+    const segs = 12;
+    const centre = [hu.x, hu.y, z];
+    const outer = [], inner = [];
+    for (let k = 0; k < segs; k++) {
+      const a = (k / segs) * Math.PI * 2;
+      outer.push([hu.x + Math.cos(a) * 26, hu.y + Math.sin(a) * 26, z]);
+      inner.push([hu.x + Math.cos(a) * 14, hu.y + Math.sin(a) * 14, z + 0.1]);
+    }
+    for (let k = 0; k < segs; k++) {
+      pushTri(out, centre, outer[k], outer[(k + 1) % segs], "#57503f");
+      pushTri(out, centre, inner[k], inner[(k + 1) % segs], "#6b6250");
+    }
+    // white "H" marking: two bars + crossbar, flat on the pad, centred on the hut
+    const hz = z + 0.2;
+    const hx = hu.x, hy = hu.y;
+    pushQuad(out, [hx - 6, hy - 8, hz], [hx - 3.5, hy - 8, hz], [hx - 3.5, hy + 8, hz], [hx - 6, hy + 8, hz], "#e8e8e8");
+    pushQuad(out, [hx + 3.5, hy - 8, hz], [hx + 6, hy - 8, hz], [hx + 6, hy + 8, hz], [hx + 3.5, hy + 8, hz], "#e8e8e8");
+    pushQuad(out, [hx - 6, hy - 1.25, hz], [hx + 6, hy - 1.25, hz], [hx + 6, hy + 1.25, hz], [hx - 6, hy + 1.25, hz], "#e8e8e8");
+    const done = Array.isArray(doneArr) ? doneArr[i] === true : false;
+    if (done) {
+      const cx = hu.x + 10, cy = hu.y + 8, cz0 = hu.z + 0.4, cz1 = hu.z + 2.6;
+      const s = 1.1;
+      pushQuad(out, [cx - s, cy - s, cz0], [cx + s, cy - s, cz0], [cx + s, cy - s, cz1], [cx - s, cy - s, cz1], "#8a6a44");
+      pushQuad(out, [cx + s, cy + s, cz0], [cx - s, cy + s, cz0], [cx - s, cy + s, cz1], [cx + s, cy + s, cz1], "#8a6a44");
+      pushQuad(out, [cx + s, cy - s, cz0], [cx + s, cy + s, cz0], [cx + s, cy + s, cz1], [cx + s, cy - s, cz1], "#8a6a44");
+      pushQuad(out, [cx - s, cy + s, cz0], [cx - s, cy - s, cz0], [cx - s, cy - s, cz1], [cx - s, cy + s, cz1], "#8a6a44");
+      pushQuad(out, [cx - s, cy - s, cz1], [cx + s, cy - s, cz1], [cx + s, cy + s, cz1], [cx - s, cy + s, cz1], "#a07a4e");
+    }
   }
 }
 
