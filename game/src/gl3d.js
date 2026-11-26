@@ -48,7 +48,10 @@ const rgbStr = (r, g, b) => `rgb(${r},${g},${b})`;
 
 // ---------- exported API ----------
 
-// Chase camera: behind (-30 fwd) and above (+10 up) the jet.
+// Chase camera: behind (-34 fwd) and above (+11 up) the jet — pulled back
+// slightly from -30/+10 so the sleeker aircraft sits a touch smaller and
+// more forward-balanced in frame. Render-only: nothing in the physics,
+// autopilot, or scoring reads the camera (see render.js smoothedCam).
 export const cameraFor = (jet) => {
   const j = jet && typeof jet === "object" ? jet : {};
   const jx = num(j.x), jy = num(j.y), jz = num(j.z);
@@ -71,9 +74,9 @@ export const cameraFor = (jet) => {
   if (!Number.isFinite(rx + ry + rz)) { rx = 1; ry = 0; rz = 0; }
   if (!Number.isFinite(ux + uy + uz)) { ux = 0; uy = 0; uz = 1; }
 
-  const ex = jx - fx * 30 + ux * 10;
-  const ey = jy - fy * 30 + uy * 10;
-  const ez = jz - fz * 30 + uz * 10;
+  const ex = jx - fx * 34 + ux * 11;
+  const ey = jy - fy * 34 + uy * 11;
+  const ez = jz - fz * 34 + uz * 11;
 
   return {
     ex, ey, ez,

@@ -68,6 +68,23 @@ function pushQuad(out, xf, a, b, c, d, color) {
   pushTri(out, xf, a, c, d, color);
 }
 
+// Raw push: no lighting applied — the caller already shaded the color.
+function pushTriRaw(out, xf, a, b, c, color) {
+  out.push({ pts: [xf(a), xf(b), xf(c)], color });
+}
+
+// Smooth-shaded push: shade ONCE from the average of the three per-vertex
+// light factors. Must NOT go through pushTri (which would light a second
+// time and darken the fuselage twice over).
+function pushTriLit(out, xf, a, b, c, color, la, lb, lc) {
+  pushTriRaw(out, xf, a, b, c, shadeHex(color, (la + lb + lc) / 3));
+}
+
+function pushQuadLit(out, xf, a, b, c, d, color, la, lb, lc, ld) {
+  pushTriLit(out, xf, a, b, c, color, la, lb, lc);
+  pushTriLit(out, xf, a, c, d, color, la, lc, ld);
+}
+
 const COL_BELLY = "#1e4fa3";
 const COL_TOP = "#f2f5f7";
 const COL_NOSE = "#d23b2e";
@@ -79,6 +96,7 @@ const COL_HUB = "#9aa2ab";
 const COL_NAV_L = "#ff3b30";
 const COL_NAV_R = "#39ff88";
 const COL_PANEL = "#163a78";
+const COL_SPINE = "#eaf7ff";
 
 function jetValid(jet) {
   return jet &&
@@ -92,82 +110,135 @@ export function planeTris(jet) {
   const out = [];
   const xf = makeXform(jet);
 
-  // ---- FUSELAGE ----
+  // ---- FUSELAGE (10-station, 10-sided loft, smooth vertex-normal shading) ----
+  // 10 sides give a flat top edge (72-108 deg band) for the canopy to sit
+  // on and a much rounder rear silhouette than the old octagon; the light
+  // per ring vertex is the elliptical radial normal, averaged per triangle
+  // (same trick as the terrain's vertexLight), so the tube reads smooth.
   const stations = [
     [12, 0.55, 0.60],
-    [8, 0.95, 1.00],
-    [4, 1.15, 1.25],
-    [0, 1.15, 1.25],
-    [-4, 1.05, 1.15],
-    [-8, 0.85, 0.95],
-    [-11, 0.55, 0.70],
-    [-13, 0.30, 0.40]
+    [9, 0.92, 0.98],
+    [6, 1.10, 1.18],
+    [3, 1.16, 1.26],
+    [0, 1.15, 1.24],
+    [-3, 1.08, 1.16],
+    [-6, 0.95, 1.02],
+    [-9, 0.78, 0.84],
+    [-11, 0.58, 0.62],
+    [-13, 0.34, 0.38]
   ];
-  const rings = stations.map(([y, w, h]) => {
+  const N = 10;
+  const rings = [];
+  const ringLights = [];
+  for (let i = 0; i < stations.length; i++) {
+    const [y, w, h] = stations[i];
     const r = [];
-    for (let k = 0; k < 8; k++) {
-      const a = k * Math.PI / 4;
-      r.push([w * Math.cos(a), y, h * Math.sin(a)]);
+    const l = [];
+    for (let k = 0; k < N; k++) {
+      const a = k * 2 * Math.PI / N;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      r.push([w * ca, y, h * sa]);
+      const n = norm([ca / w, 0, sa / h]);
+      const d = n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2];
+      l.push(0.72 + 0.28 * Math.max(0, d));
     }
-    return r;
-  });
+    rings.push(r);
+    ringLights.push(l);
+  }
 
   // nose cone
   const noseTip = [0, 14, 0];
+  const noseLight = 0.72 + 0.28 * Math.max(0, SUN[1]);
   const r0 = rings[0];
-  for (let k = 0; k < 8; k++) {
-    const a = r0[k];
-    const b = r0[(k + 1) % 8];
-    pushTri(out, xf, noseTip, a, b, COL_NOSE);
+  const l0 = ringLights[0];
+  for (let k = 0; k < N; k++) {
+    const k2 = (k + 1) % N;
+    pushTriLit(out, xf, noseTip, r0[k], r0[k2], COL_NOSE, noseLight, l0[k], l0[k2]);
   }
 
-  // side quads
+  // side quads — the top band (k=2, 72-108 deg) is the bright spine stripe
   for (let i = 0; i < rings.length - 1; i++) {
     const ra = rings[i];
     const rb = rings[i + 1];
-    for (let k = 0; k < 8; k++) {
-      const k2 = (k + 1) % 8;
+    const la = ringLights[i];
+    const lb = ringLights[i + 1];
+    for (let k = 0; k < N; k++) {
+      const k2 = (k + 1) % N;
       const a = ra[k], b = ra[k2], c = rb[k2], d = rb[k];
       const mz = (a[2] + b[2] + c[2] + d[2]) / 4;
-      const col = mz < 0 ? COL_BELLY : COL_TOP;
-      pushQuad(out, xf, a, b, c, d, col);
+      let col;
+      if (k === 2) col = COL_SPINE;
+      else col = mz < 0 ? COL_BELLY : COL_TOP;
+      pushQuadLit(out, xf, a, b, c, d, col, la[k], la[k2], lb[k2], lb[k]);
     }
   }
 
   // tail cap
   const rl = rings[rings.length - 1];
+  const ll = ringLights[ringLights.length - 1];
   const tailCenter = [0, -13, 0];
-  for (let k = 0; k < 8; k++) {
-    const a = rl[k];
-    const b = rl[(k + 1) % 8];
-    pushTri(out, xf, tailCenter, b, a, COL_TOP);
+  const tailLight = 0.72 + 0.28 * Math.max(0, -SUN[1]);
+  for (let k = 0; k < N; k++) {
+    const k2 = (k + 1) % N;
+    pushTriLit(out, xf, tailCenter, rl[k2], rl[k], COL_TOP, tailLight, ll[k2], ll[k]);
   }
 
-  // ---- CANOPY ----
-  const cFrontY = 3.5, cMidY = 6.5, cBackY = 8.5;
-  const cW = 0.85;
-  const cFrontLo = 1.05, cFrontHi = 1.55, cMidHi = 2.05, cBackHi = 1.45;
-  const cFL = [-cW, cFrontY, cFrontLo], cFR = [cW, cFrontY, cFrontLo];
-  const cFHL = [-cW, cFrontY, cFrontHi], cFHR = [cW, cFrontY, cFrontHi];
-  const cML = [-cW, cMidY, cMidHi], cMR = [cW, cMidY, cMidHi];
-  const cBL = [-cW, cBackY, cBackHi], cBR = [cW, cBackY, cBackHi];
-  const cBLL = [-cW, cBackY, cFrontLo], cBRL = [cW, cBackY, cFrontLo];
-
-  // top: two quads
-  pushQuad(out, xf, cFHL, cFHR, cMR, cML, COL_GLASS);
-  pushQuad(out, xf, cML, cMR, cBR, cBL, COL_GLASS);
-  // front
-  pushQuad(out, xf, cFL, cFR, cFHR, cFHL, COL_GLASS);
-  // back
-  pushQuad(out, xf, cBLL, cBRL, cBR, cBL, COL_GLASS);
-  // left
-  pushQuad(out, xf, cFL, cFHL, cML, cBL, COL_GLASS);
-  // right
-  pushQuad(out, xf, cFR, cBR, cMR, cFHR, COL_GLASS);
-  // glint stripe
+  // ---- CANOPY (low teardrop half-loft, base sunk into the fuselage top) ----
+  const canopySections = [
+    [3.5, 0.72, 1.10, 1.55],
+    [6, 0.80, 1.05, 1.85],
+    [8.5, 0.40, 0.95, 1.45]
+  ];
+  const arcs = [];
+  const arcLights = [];
+  for (let i = 0; i < canopySections.length; i++) {
+    const [y, w, baseZ, topZ] = canopySections[i];
+    const midZ = (baseZ + topZ) / 2;
+    const pts = [
+      [-w, y, baseZ],
+      [-0.75 * w, y, midZ],
+      [0, y, topZ],
+      [0.75 * w, y, midZ],
+      [w, y, baseZ]
+    ];
+    const ctr = [0, y, baseZ];
+    const ls = [];
+    for (let p = 0; p < pts.length; p++) {
+      const v = [pts[p][0] - ctr[0], pts[p][1] - ctr[1], pts[p][2] - ctr[2]];
+      const n = norm(v);
+      const d = n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2];
+      ls.push(0.72 + 0.28 * Math.max(0, d));
+    }
+    arcs.push(pts);
+    arcLights.push(ls);
+  }
+  for (let i = 0; i < arcs.length - 1; i++) {
+    const A = arcs[i], B = arcs[i + 1];
+    const LA = arcLights[i], LB = arcLights[i + 1];
+    for (let p = 0; p < 4; p++) {
+      pushQuadLit(out, xf, A[p], A[p + 1], B[p + 1], B[p], COL_GLASS,
+        LA[p], LA[p + 1], LB[p + 1], LB[p]);
+    }
+  }
+  // front cap (faces forward) and back cap (faces backward)
+  const frontCtr = [0, 3.5, 1.10];
+  const frontL = arcLights[0];
+  const frontCtrLight = 0.72 + 0.28 * Math.max(0, SUN[1]);
+  for (let p = 0; p < 4; p++) {
+    pushTriLit(out, xf, frontCtr, arcs[0][p], arcs[0][p + 1], COL_GLASS,
+      frontCtrLight, frontL[p], frontL[p + 1]);
+  }
+  const backCtr = [0, 8.5, 0.95];
+  const backL = arcLights[2];
+  const backCtrLight = 0.72 + 0.28 * Math.max(0, -SUN[1]);
+  for (let p = 0; p < 4; p++) {
+    pushTriLit(out, xf, backCtr, arcs[2][p + 1], arcs[2][p], COL_GLASS,
+      backCtrLight, backL[p + 1], backL[p]);
+  }
+  // glint streak on the canopy top
   pushQuad(out, xf,
-    [-0.5, 4.2, 1.70], [0.5, 4.2, 1.70],
-    [0.5, 7.0, 1.93], [-0.5, 7.0, 1.93], COL_GLINT);
+    [-0.45, 4.2, 1.70], [0.45, 4.2, 1.70],
+    [0.45, 7.0, 1.90], [-0.45, 7.0, 1.90], COL_GLINT);
 
   // ---- WINGS ----
   function wing(sign) {
@@ -194,6 +265,10 @@ export function planeTris(jet) {
     const fF2 = [s * 8, -0.7, 0.48];
     const fB2 = [s * 8, -1.5, 0.48];
     pushQuad(out, xf, fF, fF2, fB2, fB, COL_PANEL);
+    // winglet: small vertical fin at the tip, swept slightly back
+    pushQuad(out, xf,
+      [s * 16, 3.2, 1.1], [s * 16, -2.2, 1.1],
+      [s * 16, -2.9, 2.5], [s * 16, 2.2, 2.5], COL_NOSE);
   }
   wing(1);
   wing(-1);
@@ -206,22 +281,22 @@ export function planeTris(jet) {
     [15.6, 0.2, 1.1], [16.2, 0.2, 1.1],
     [16.2, 1.0, 1.1], [15.6, 1.0, 1.1], COL_NAV_R);
 
-  // ---- TAIL ----
+  // ---- TAIL (swept, tapered stabilizers) ----
   pushQuad(out, xf,
     [0.8, -9.5, 0.3], [0.8, -12.5, 0.3],
-    [7, -13, 0.9], [7, -10, 0.9], COL_BELLY);
+    [6.5, -13.0, 0.9], [6.5, -11.2, 0.9], COL_BELLY);
   pushQuad(out, xf,
-    [-0.8, -9.5, 0.3], [-7, -10, 0.9],
-    [-7, -13, 0.9], [-0.8, -12.5, 0.3], COL_BELLY);
+    [-0.8, -9.5, 0.3], [-0.8, -12.5, 0.3],
+    [-6.5, -13.0, 0.9], [-6.5, -11.2, 0.9], COL_BELLY);
 
   // fin
   pushQuad(out, xf,
     [0, -9.0, 0.5], [0, -12.8, 0.5],
-    [0, -12.2, 4.4], [0, -9.8, 4.4], COL_BELLY);
+    [0, -12.4, 4.2], [0, -10.8, 4.4], COL_BELLY);
   // fin tip
   pushQuad(out, xf,
-    [-0.12, -11.0, 4.0], [0.12, -11.0, 4.0],
-    [0.12, -12.0, 4.4], [-0.12, -12.0, 4.4], COL_NOSE);
+    [-0.12, -11.2, 4.0], [0.12, -11.2, 4.0],
+    [0.12, -12.2, 4.2], [-0.12, -12.2, 4.2], COL_NOSE);
 
   // ---- NOSE SPINNER ----
   const spinApex = [0, 15.2, 0];
