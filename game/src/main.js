@@ -8,7 +8,7 @@ import { createInput } from "./input.js";
 import { createAudio } from "./audio.js";
 import { createWorld, resetWorld, stepWorld } from "./world.js";
 import { drawScene } from "./render.js";
-import { drawHud } from "./hud.js";
+import { drawHud, glassBox, drawKeyChips, replayPillRect } from "./hud.js";
 import { stageShot, autopilot } from "./shots.js";
 
 const canvas = document.getElementById("game");
@@ -30,7 +30,17 @@ if (canvas) {
   let paused = false;
   let lastPhase = world.phase;
   let clicked = false;
-  canvas.addEventListener("click", () => { clicked = true; });
+  let clickX = 0, clickY = 0;
+  canvas.addEventListener("click", (e) => {
+    clicked = true;
+    // Map the click into 1280x720 canvas space (the canvas is CSS-scaled
+    // to the viewport, so scale the client coords back).
+    const rect = canvas.getBoundingClientRect();
+    const sx = STAGE.width / Math.max(1, rect.width);
+    const sy = STAGE.height / Math.max(1, rect.height);
+    clickX = (e.clientX - rect.left) * sx;
+    clickY = (e.clientY - rect.top) * sy;
+  });
   if (shotParam) {
     const staged = stageShot(shotParam, world);
     if (staged && staged.screen) screen = staged.screen;
@@ -57,34 +67,138 @@ if (canvas) {
       return result();
     }
   };
+  let titleScrim = null;
   function drawTitleOverlay() {
     ctx.save();
+
+    // Full-screen vertical scrim gradient (keeps the live 3D scene visible).
+    // Static: build once, reuse every title frame.
+    if (!titleScrim) {
+      titleScrim = ctx.createLinearGradient(0, 0, 0, 720);
+      titleScrim.addColorStop(0, "rgba(4,12,20,0.50)");
+      titleScrim.addColorStop(0.5, "rgba(4,12,20,0.12)");
+      titleScrim.addColorStop(1, "rgba(4,12,20,0.45)");
+    }
+    ctx.fillStyle = titleScrim;
+    ctx.fillRect(0, 0, 1280, 720);
+
+    // Centred glass title card (top y=150 stays clear of the HUD boxes,
+    // which end at y=146).
+    const cardX = 260, cardY = 150, cardW = 760, cardH = 430;
+    glassBox(ctx, cardX, cardY, cardW, cardH, 16);
+
+    // Title with cyan glow.
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(4,12,20,0.72)";
-    ctx.fillRect(0, 0, 1280, 260);
-    ctx.fillStyle = "rgba(4,12,20,0.45)";
-    ctx.fillRect(0, 260, 1280, 460);
-    ctx.shadowBlur = 24;
+    ctx.save();
+    ctx.shadowBlur = 18;
     ctx.shadowColor = "#7df9ff";
     ctx.fillStyle = "#eaf7ff";
-    ctx.font = "bold 64px monospace";
-    ctx.fillText("ATOLL RUN", 640, 170);
-    ctx.shadowBlur = 0;
+    ctx.font = "bold 58px monospace";
+    ctx.fillText("ATOLL RUN", 640, 225);
+    ctx.restore();
+
+    // Accent rule under title.
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(640 - 60, 258.5);
+    ctx.lineTo(640 + 60, 258.5);
+    ctx.strokeStyle = "#7df9ff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // Tagline.
     ctx.fillStyle = "#7df9ff";
-    ctx.font = "20px monospace";
-    ctx.fillText("ONE SORTIE, THREE MISSIONS", 640, 215);
-    ctx.fillStyle = "#c8d4e8";
     ctx.font = "18px monospace";
-    for (let i = 0; i < SORTIE.briefings.length; i += 1) ctx.fillText(SORTIE.briefings[i], 640, 300 + i * 40);
-    ctx.fillStyle = "rgba(200,220,230,0.8)";
-    ctx.font = "16px monospace";
-    ctx.fillText("W/S THROTTLE   ARROWS FLY   SPACE DROP   R RESTART   M MUTE", 640, 470);
+    ctx.textBaseline = "middle";
+    ctx.fillText("ONE SORTIE, THREE MISSIONS", 640, 273);
+
+    // Three stage mini-cards.
+    const miniW = 226, miniH = 92, miniGap = 8;
+    const miniTotal = miniW * 3 + miniGap * 2;
+    const miniStartX = 640 - miniTotal / 2;
+    const miniY = 300;
+
+    for (let i = 0; i < 3; i += 1) {
+      const mx = miniStartX + i * (miniW + miniGap);
+      glassBox(ctx, mx, miniY, miniW, miniH, 10);
+
+      // Parse briefing: "STAGE 1 — RING COURSE: fly 5 glowing rings."
+      const raw = (SORTIE && SORTIE.briefings && SORTIE.briefings[i]) ? String(SORTIE.briefings[i]) : "";
+      let name = "", objective = "";
+      const dashIdx = raw.indexOf("—");
+      let afterDash = raw;
+      if (dashIdx >= 0) afterDash = raw.slice(dashIdx + 1).trim();
+      const colonIdx = afterDash.indexOf(":");
+      if (colonIdx >= 0) {
+        name = afterDash.slice(0, colonIdx).trim();
+        objective = afterDash.slice(colonIdx + 1).trim();
+      } else {
+        name = afterDash.trim();
+      }
+      if (objective.length > 0 && objective.charAt(objective.length - 1) === ".") {
+        objective = objective.slice(0, -1);
+      }
+
+      const numStr = "0" + (i + 1);
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = "#7df9ff";
+      ctx.font = "bold 15px monospace";
+      ctx.fillText(numStr, mx + 12, miniY + 24);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 14px monospace";
+      ctx.fillText(name, mx + 12, miniY + 48);
+
+      ctx.fillStyle = "rgba(255,255,255,0.62)";
+      ctx.font = "12px monospace";
+      ctx.fillText(objective, mx + 12, miniY + 70);
+    }
+
+    // Keybind chips row.
+    drawKeyChips(ctx, [
+      ["W/S", "THROTTLE"],
+      ["ARROWS", "FLY"],
+      ["SPACE", "DROP"],
+      ["R", "RESTART"],
+      ["M", "MUTE"]
+    ], 640, 445);
+
+    // CTA pill (blinking).
+    const ctaW = 380, ctaH = 46;
+    const ctaX = 640 - ctaW / 2;
+    const ctaY = 520 - ctaH / 2;
+    ctx.save();
+    ctx.beginPath();
+    const rr = 23;
+    ctx.moveTo(ctaX + rr, ctaY);
+    ctx.lineTo(ctaX + ctaW - rr, ctaY);
+    ctx.arcTo(ctaX + ctaW, ctaY, ctaX + ctaW, ctaY + rr, rr);
+    ctx.lineTo(ctaX + ctaW, ctaY + ctaH - rr);
+    ctx.arcTo(ctaX + ctaW, ctaY + ctaH, ctaX + ctaW - rr, ctaY + ctaH, rr);
+    ctx.lineTo(ctaX + rr, ctaY + ctaH);
+    ctx.arcTo(ctaX, ctaY + ctaH, ctaX, ctaY + ctaH - rr, rr);
+    ctx.lineTo(ctaX, ctaY + rr);
+    ctx.arcTo(ctaX, ctaY, ctaX + rr, ctaY, rr);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(6,18,28,0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "#7df9ff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
     if (Math.floor(performance.now() / 500) % 2 === 0) {
       ctx.fillStyle = "#7df9ff";
-      ctx.font = "20px monospace";
-      ctx.fillText("PRESS ENTER OR CLICK TO FLY", 640, 540);
+      ctx.font = "bold 18px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("PRESS ENTER OR CLICK TO FLY", 640, 520);
     }
+
     ctx.restore();
   }
   function anyDown(codes) { for (let i = 0; i < codes.length; i += 1) if (input.isDown(codes[i])) return true; return false; }
@@ -132,6 +246,9 @@ if (canvas) {
       if (anyPressed(["Enter", "NumpadEnter"]) || clicked) { startGame(); clicked = false; }
     } else if (screen === "play") {
       handleGlobalKeys();
+      // Consume any click made during play so it cannot leak into the
+      // end-screen replay pill on the frame the sortie ends.
+      clicked = false;
       if (!paused && !frozen) {
         acc += dt;
         let steps = 0;
@@ -147,6 +264,16 @@ if (canvas) {
       }
     } else {
       handleGlobalKeys();
+      // Clicking the "PRESS R TO FLY AGAIN" pill restarts the mission.
+      if (clicked) {
+        const wasClicked = clicked;
+        clicked = false;
+        if (wasClicked && (screen === "won" || screen === "lost" || screen === "crashed")) {
+          const ph = (screen === "won" && world.breakdown) ? 380 : 240;
+          const pill = replayPillRect(ph);
+          if (clickX >= pill.x && clickX <= pill.x + pill.w && clickY >= pill.y && clickY <= pill.y + pill.h) restartMission();
+        }
+      }
     }
     ctx.clearRect(0, 0, STAGE.width, STAGE.height);
     drawScene(ctx, world, { time: world.elapsed });
