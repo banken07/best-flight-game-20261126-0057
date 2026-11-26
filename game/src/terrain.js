@@ -73,9 +73,32 @@ function triNormal(a, b, c) {
 
 const SUN = norm([0.5, 0.35, 1]);
 
-function sunLight(n) {
+function vertexLight(n, h) {
   const d = n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2];
-  return 0.70 + 0.30 * Math.max(0, d);
+  const diffuse = Math.max(0, d);
+  const hemi = 0.5 + 0.5 * n[2];
+  const skyR = 0.96, skyG = 1.01, skyB = 1.10;
+  const gndR = 1.05, gndG = 0.97, gndB = 0.88;
+  const ambR = (gndR + (skyR - gndR) * hemi) * 0.62;
+  const ambG = (gndG + (skyG - gndG) * hemi) * 0.62;
+  const ambB = (gndB + (skyB - gndB) * hemi) * 0.62;
+  const sunR = 1.0 * diffuse * 0.55;
+  const sunG = 0.95 * diffuse * 0.55;
+  const sunB = 0.85 * diffuse * 0.55;
+  const nd = -(n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2]);
+  const shadow = 1 - 0.22 * smoothstep(0.25, 0.7, nd) * smoothstep(0.35, 0.8, 1 - n[2]);
+  const ao = 0.86 + 0.14 * smoothstep(0, 70, h);
+  const s = shadow * ao;
+  return [
+    clamp((ambR + sunR) * s, 0, 1.15),
+    clamp((ambG + sunG) * s, 0, 1.15),
+    clamp((ambB + sunB) * s, 0, 1.15)
+  ];
+}
+
+function sunLight(n) {
+  const l = vertexLight(n, 40);
+  return (l[0] + l[1] + l[2]) / 3;
 }
 
 export function heightAt(x, y, seed) {
@@ -126,12 +149,36 @@ export function heightAt(x, y, seed) {
   return clamp(h, -12, 220);
 }
 
-function terrainColor(h, r) {
-  if (r > 900 && r < 1150) return "#d8c08a";
-  if (h < 6) return "#d8c08a";
-  if (h < 55) return hexLerp("#79b657", "#4d8a3a", (h - 6) / 49);
-  if (h < 110) return hexLerp("#4d8a3a", "#8a6a44", (h - 55) / 55);
-  return "#7a7568";
+function terrainColorSmooth(h, r, x, y, seed) {
+  let col = "#d8c08a";
+  const w1 = smoothstep(3, 16, h);
+  col = hexLerp(col, "#79b657", w1);
+  const w2 = smoothstep(35, 60, h);
+  col = hexLerp(col, "#4d8a3a", w2);
+  const w3 = smoothstep(85, 125, h);
+  col = hexLerp(col, "#8a6a44", w3);
+  const w4 = smoothstep(150, 210, h);
+  col = hexLerp(col, "#7a7568", w4);
+  const beachIn = smoothstep(950, 1000, r);
+  const beachOut = 1 - smoothstep(1100, 1150, r);
+  const beachW = beachIn * beachOut * 0.85;
+  if (beachW > 0) col = hexLerp(col, "#d8c08a", beachW);
+  const cs = 260;
+  const gx = x / cs, gy = y / cs;
+  const ix = Math.floor(gx), iy = Math.floor(gy);
+  const fx = gx - ix, fy = gy - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const n00 = hash2(ix, iy, seed + 555);
+  const n10 = hash2(ix + 1, iy, seed + 555);
+  const n01 = hash2(ix, iy + 1, seed + 555);
+  const n11 = hash2(ix + 1, iy + 1, seed + 555);
+  const nx0 = n00 + (n10 - n00) * sx;
+  const nx1 = n01 + (n11 - n01) * sx;
+  const noise = nx0 + (nx1 - nx0) * sy;
+  const bright = 1 + (noise - 0.5) * 0.08;
+  const rgb = hexToRgb(col);
+  return rgbToHex(rgb[0] * bright, rgb[1] * bright, rgb[2] * bright);
 }
 
 export function buildIsland(seed) {
@@ -147,7 +194,40 @@ export function buildIsland(seed) {
       heights[j * (N + 1) + i] = heightAt(x, y, seed);
     }
   }
-  const jitter = (ix, iy) => 0.94 + hash2(ix, iy, seed + 999) * 0.12;
+  const normals = new Float64Array((N + 1) * (N + 1) * 3);
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const iL = i > 0 ? i - 1 : i;
+      const iR = i < N ? i + 1 : i;
+      const jD = j > 0 ? j - 1 : j;
+      const jU = j < N ? j + 1 : j;
+      const hL = heights[j * (N + 1) + iL];
+      const hR = heights[j * (N + 1) + iR];
+      const hD = heights[jD * (N + 1) + i];
+      const hU = heights[jU * (N + 1) + i];
+      const dx = (iR - iL) * step;
+      const dy = (jU - jD) * step;
+      const dhdx = dx > 0 ? (hR - hL) / dx : 0;
+      const dhdy = dy > 0 ? (hU - hD) / dy : 0;
+      const n = norm([-dhdx, -dhdy, 1]);
+      const k = (j * (N + 1) + i) * 3;
+      normals[k] = n[0];
+      normals[k + 1] = n[1];
+      normals[k + 2] = n[2];
+    }
+  }
+  const lights = new Float64Array((N + 1) * (N + 1) * 3);
+  for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= N; i++) {
+      const k = (j * (N + 1) + i) * 3;
+      const n = [normals[k], normals[k + 1], normals[k + 2]];
+      const h = heights[j * (N + 1) + i];
+      const l = vertexLight(n, h);
+      lights[k] = l[0];
+      lights[k + 1] = l[1];
+      lights[k + 2] = l[2];
+    }
+  }
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const x0 = min + i * step, x1 = x0 + step;
@@ -160,26 +240,26 @@ export function buildIsland(seed) {
         [[x0, y0, h00], [x1, y0, h10], [x1, y1, h11]],
         [[x0, y0, h00], [x1, y1, h11], [x0, y1, h01]]
       ];
+      const idx = [
+        [j * (N + 1) + i, j * (N + 1) + i + 1, (j + 1) * (N + 1) + i + 1],
+        [j * (N + 1) + i, (j + 1) * (N + 1) + i + 1, (j + 1) * (N + 1) + i]
+      ];
       for (let q = 0; q < 2; q++) {
         const t = quads[q];
         const ccx = (t[0][0] + t[1][0] + t[2][0]) / 3;
         const ccy = (t[0][1] + t[1][1] + t[2][1]) / 3;
-        // Skip only the open sea: low triangles OUTSIDE the island (centre
-        // radius > 1100 m) are water and the 2D sea gradient covers them.
-        // Low triangles on land (the flattened runway corridor, h=0) must
-        // still render as sand — skipping them leaves a hole that shows
-        // the sea gradient under the runway.
         if (t[0][2] <= 0.5 && t[1][2] <= 0.5 && t[2][2] <= 0.5 && Math.hypot(ccx, ccy) > 1100) continue;
         const cx = (t[0][0] + t[1][0] + t[2][0]) / 3;
         const cy = (t[0][1] + t[1][1] + t[2][1]) / 3;
         const cz = (t[0][2] + t[1][2] + t[2][2]) / 3;
         const r = Math.hypot(cx, cy);
-        let col = terrainColor(cz, r);
-        const n = triNormal(t[0], t[1], t[2]);
-        const light = sunLight(n);
-        const jf = jitter(i * 2 + q, j);
-        const rgb = hexToRgb(col);
-        col = rgbToHex(rgb[0] * light * jf, rgb[1] * light * jf, rgb[2] * light * jf);
+        const base = terrainColorSmooth(cz, r, cx, cy, seed);
+        const ia = idx[q][0] * 3, ib = idx[q][1] * 3, ic = idx[q][2] * 3;
+        const lr = (lights[ia] + lights[ib] + lights[ic]) / 3;
+        const lg = (lights[ia + 1] + lights[ib + 1] + lights[ic + 1]) / 3;
+        const lb = (lights[ia + 2] + lights[ib + 2] + lights[ic + 2]) / 3;
+        const rgb = hexToRgb(base);
+        const col = rgbToHex(rgb[0] * lr, rgb[1] * lg, rgb[2] * lb);
         tris.push({ pts: [t[0], t[1], t[2]], color: col });
       }
     }
@@ -298,33 +378,48 @@ export function collectRunwayTris(island, cam, out) {
   if (rw) {
     const rcx = (rw.x0 + rw.x1) / 2, rcy = (rw.y0 + rw.y1) / 2, rcz = rw.z || 2;
     if (Math.hypot(rcx - ex, rcy - ey, rcz - ez) <= 5200) {
-      // Medium-grey asphalt: dark enough to read as a runway against the
-      // green grass, light enough not to be mistaken for the sea.
-      // Drawn in short segments, not one long quad: the painter's
-      // algorithm sorts by centre distance, and one 600 m quad sorts
-      // behind the nearer terrain triangles and vanishes under them.
       const segLen = 50;
+      const dz = rw.z + 0.5;
       for (let y = rw.y0; y < rw.y1; y += segLen) {
         const yb = Math.min(y + segLen, rw.y1);
         pushQuad(out,
           [rw.x0, y, rw.z], [rw.x1, y, rw.z],
           [rw.x1, yb, rw.z], [rw.x0, yb, rw.z], "#5a5f66");
+        pushQuad(out,
+          [-38, y, rw.z], [-30, y, rw.z],
+          [-30, yb, rw.z], [-38, yb, rw.z], "#4a4f55");
+        pushQuad(out,
+          [30, y, rw.z], [38, y, rw.z],
+          [38, yb, rw.z], [30, yb, rw.z], "#4a4f55");
+        pushQuad(out,
+          [-29, y, dz], [-27, y, dz],
+          [-27, yb, dz], [-29, yb, dz], "#f0f0f0");
+        pushQuad(out,
+          [27, y, dz], [29, y, dz],
+          [29, yb, dz], [27, yb, dz], "#f0f0f0");
       }
-      const dz = rw.z + 0.5;
       for (let y = -280; y <= 280; y += 40) {
         pushQuad(out,
-          [-1, y - 9, dz], [1, y - 9, dz],
-          [1, y + 9, dz], [-1, y + 9, dz], "#e8e8e8");
+          [-1.5, y - 9, dz], [1.5, y - 9, dz],
+          [1.5, y + 9, dz], [-1.5, y + 9, dz], "#e8e8e8");
       }
       const ends = [rw.y0 + 10, rw.y1 - 10];
       for (let e = 0; e < 2; e++) {
         const yc = ends[e];
-        for (let k = 0; k < 4; k++) {
-          const xc = -22.5 + k * 15;
+        for (let k = 0; k < 6; k++) {
+          const xc = -26.25 + k * 10.5;
           pushQuad(out,
             [xc - 3, yc - 6, dz], [xc + 3, yc - 6, dz],
             [xc + 3, yc + 6, dz], [xc - 3, yc + 6, dz], "#e8e8e8");
         }
+      }
+      for (let y = -300; y <= 300; y += 50) {
+        pushQuad(out,
+          [-31.25, y - 1.25, dz + 0.3], [-28.75, y - 1.25, dz + 0.3],
+          [-28.75, y + 1.25, dz + 0.3], [-31.25, y + 1.25, dz + 0.3], "#ffe9a8");
+        pushQuad(out,
+          [28.75, y - 1.25, dz + 0.3], [31.25, y - 1.25, dz + 0.3],
+          [31.25, y + 1.25, dz + 0.3], [28.75, y + 1.25, dz + 0.3], "#ffe9a8");
       }
     }
   }
