@@ -23,9 +23,9 @@ function getGlassGradient(ctx, w, h) {
 }
 
 // ---------------------------------------------------------------------------
-// Rounded rect path helper.
+// Rounded rect path helper (also used by main.js for the title-card backing).
 // ---------------------------------------------------------------------------
-function roundRectPath(ctx, x, y, w, h, r) {
+export function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
@@ -206,7 +206,12 @@ export function drawHud(ctx, world, screen) {
     // -----------------------------------------------------------------
     const bx = 16, by = 14, bw = 170, bh = 62, gap = 10;
     const knots = speedMs * 1.94384;
-    const overSpeed = knots > 150;
+    // Pre-flight (title) screen: never show the amber over-speed state —
+    // the jet's initial speed (120 m/s = 233 knots) already exceeds the
+    // 150-knot mission limit, so it would read as an active violation
+    // before flying starts. The warning stays fully live during play and
+    // on end screens (gated only on the title screen state).
+    const overSpeed = screen !== "title" && knots > 150;
 
     // ALTITUDE
     glassBox(ctx, bx, by, bw, bh, 8);

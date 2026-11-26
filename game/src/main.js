@@ -8,7 +8,7 @@ import { createInput } from "./input.js";
 import { createAudio } from "./audio.js";
 import { createWorld, resetWorld, stepWorld } from "./world.js";
 import { drawScene } from "./render.js";
-import { drawHud, glassBox, drawKeyChips, replayPillRect } from "./hud.js";
+import { drawHud, glassBox, drawKeyChips, replayPillRect, roundRectPath } from "./hud.js";
 import { stageShot, autopilot } from "./shots.js";
 
 const canvas = document.getElementById("game");
@@ -82,9 +82,20 @@ if (canvas) {
     ctx.fillStyle = titleScrim;
     ctx.fillRect(0, 0, 1280, 720);
 
-    // Centred glass title card (top y=150 stays clear of the HUD boxes,
-    // which end at y=146).
+    // Opaque backing under the glass title card: the live 3D scene used to
+    // ghost through the translucent glass — notably the glowing mission
+    // ring centred behind the card (plus its "1235 m" distance label),
+    // which read as HUD clutter. The backing keeps the card's glass
+    // border/highlight while nothing from the scene shows through it; the
+    // scene stays visible around the card. (The HUD attitude indicator was
+    // already suppressed on the title screen — the ghost was the 3D ring,
+    // not the indicator; the bottom-left corner was already empty.)
     const cardX = 260, cardY = 150, cardW = 760, cardH = 430;
+    ctx.save();
+    roundRectPath(ctx, cardX, cardY, cardW, cardH, 16);
+    ctx.fillStyle = "rgba(5,14,22,0.94)";
+    ctx.fill();
+    ctx.restore();
     glassBox(ctx, cardX, cardY, cardW, cardH, 16);
 
     // Title with cyan glow.
