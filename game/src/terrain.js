@@ -187,12 +187,13 @@ export function heightAt(x, y, seed) {
 }
 
 function terrainColorSmooth(h, r, x, y, seed, slope) {
-  let col = "#d8c08a";
-  const w1 = smoothstep(3, 16, h);
-  col = hexLerp(col, "#79b657", w1);
+  // Base is meadow green (was sand): the valley floor (h near 0) and lower
+  // slopes read green/lush now; sand survives only at the beach (r 950-1150
+  // blend below). Brown is pushed up to genuinely high ground (110-155).
+  let col = "#79b657";
   const w2 = smoothstep(35, 60, h);
   col = hexLerp(col, "#4d8a3a", w2);
-  const w3 = smoothstep(85, 125, h);
+  const w3 = smoothstep(110, 155, h);
   col = hexLerp(col, "#8a6a44", w3);
   const w4 = smoothstep(150, 210, h);
   col = hexLerp(col, "#7a7568", w4);
@@ -203,8 +204,10 @@ function terrainColorSmooth(h, r, x, y, seed, slope) {
   // Slope/elevation shading: steep ground goes darker mossy rock, high
   // steep peaks go pale ridge rock. slope = 1 - normalZ (0 = flat).
   const steep = smoothstep(0.14, 0.30, slope);
+  // Mossy rock only on steep AND high ground: low steep slopes stay green.
+  const highGround = smoothstep(60, 110, h);
   const beachOff = 1 - smoothstep(1000, 1150, r);
-  col = hexLerp(col, "#5d5838", steep * beachOff * 0.7);
+  col = hexLerp(col, "#5d5838", steep * highGround * beachOff * 0.7);
   const peak = smoothstep(160, 205, h) * (0.4 + 0.6 * smoothstep(0.10, 0.25, slope));
   col = hexLerp(col, "#8d867a", peak * 0.6);
   const cs = 260;
@@ -380,12 +383,12 @@ export function buildIsland(seed) {
     bushes.push({ x, y, z: h, s: 4 + rng() * 5, rot: rng() * Math.PI });
   }
   const clouds = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 14; i++) {
     clouds.push({
       x: (rng() * 2 - 1) * 3200,
       y: (rng() * 2 - 1) * 3200,
       z: 480 + rng() * 180,
-      rx: 120 + rng() * 140
+      rx: 200 + rng() * 200
     });
   }
   const huts = HUT_SPOTS.map(p => ({ x: p.x, y: p.y, z: heightAt(p.x, p.y, seed) }));

@@ -111,6 +111,7 @@ const COL_HUB = "#9aa2ab";
 const COL_NAV_L = "#ff3b30";
 const COL_NAV_R = "#39ff88";
 const COL_PANEL = "#163a78";
+const COL_AILERON = "#f2c21a";
 const COL_SPINE = "#eaf7ff";
 
 function jetValid(jet) {
@@ -125,8 +126,8 @@ export function planeTris(jet) {
   const out = [];
   const xf = makeXform(jet);
 
-  // ---- FUSELAGE (10-station, 10-sided loft, smooth vertex-normal shading) ----
-  // 10 sides give a flat top edge (72-108 deg band) for the canopy to sit
+  // ---- FUSELAGE (10-station, 12-sided loft, smooth vertex-normal shading) ----
+  // 12 sides give a flat top edge (75-105 deg band) for the canopy to sit
   // on and a much rounder rear silhouette than the old octagon; the light
   // per ring vertex is the elliptical radial normal, averaged per triangle
   // (same trick as the terrain's vertexLight), so the tube reads smooth.
@@ -142,7 +143,7 @@ export function planeTris(jet) {
     [-11, 0.58, 0.62],
     [-13, 0.34, 0.38]
   ];
-  const N = 10;
+  const N = 12;
   const rings = [];
   const ringLights = [];
   for (let i = 0; i < stations.length; i++) {
@@ -171,7 +172,7 @@ export function planeTris(jet) {
     pushTriLit(out, xf, noseTip, r0[k], r0[k2], COL_NOSE, noseLight, l0[k], l0[k2]);
   }
 
-  // side quads — the top band (k=2, 72-108 deg) is the bright spine stripe
+  // side quads — the top band (k=3, 75-105 deg) is the bright spine stripe
   for (let i = 0; i < rings.length - 1; i++) {
     const ra = rings[i];
     const rb = rings[i + 1];
@@ -182,7 +183,7 @@ export function planeTris(jet) {
       const a = ra[k], b = ra[k2], c = rb[k2], d = rb[k];
       const mz = (a[2] + b[2] + c[2] + d[2]) / 4;
       let col;
-      if (k === 2) col = COL_SPINE;
+      if (k === 3) col = COL_SPINE;
       else col = mz < 0 ? COL_BELLY : COL_TOP;
       pushQuadLit(out, xf, a, b, c, d, col, la[k], la[k2], lb[k2], lb[k]);
     }
@@ -273,19 +274,21 @@ export function planeTris(jet) {
     // 0) puts the RIGHT aileron UP and the LEFT aileron DOWN. With the
     // hinge axis root -> tip, a positive Rodrigues angle drops the right
     // trailing edge and lifts the left one, so the angle is negative when
-    // bankDeg is positive: theta = -(bankDeg/45) * 25deg, same sign both
-    // sides, opposite deflections. 25deg (not 15) so the deflection reads
-    // clearly from the rear chase view — still inside real aileron travel
-    // (up to ~25deg). Driven by jet.bankDeg (the physics value), visual
-    // only — never feeds back into the flight model.
+    // bankDeg is positive: theta = -(bankDeg/45) * 30deg, same sign both
+    // sides, opposite deflections. 30deg (was 25) plus the amber colour so
+    // the deflection reads clearly in a static rear view — at the top end
+    // of real aileron travel (~25-30deg). Amber (#f2c21a) pops against
+    // both the blue inner panel and the red tip panel. Driven by
+    // jet.bankDeg (the physics value), visual only — never feeds back into
+    // the flight model.
     const aF = [s * 9, -1.6, 0.53];
     const aB = [s * 9, -2.5, 0.53];
     const aF2 = [s * 15.5, -1.6, 1.06];
     const aB2 = [s * 15.5, -2.5, 1.06];
-    const theta = -(jet.bankDeg / 45) * (25 * Math.PI / 180);
+    const theta = -(jet.bankDeg / 45) * (30 * Math.PI / 180);
     const aBr = rotHinge(aB, aF, aF2, theta);
     const aB2r = rotHinge(aB2, aF, aF2, theta);
-    pushQuad(out, xf, aF, aF2, aB2r, aBr, COL_PANEL);
+    pushQuad(out, xf, aF, aF2, aB2r, aBr, COL_AILERON);
     // flap
     const fF = [s * 1.5, -0.7, 0.16];
     const fB = [s * 1.5, -1.5, 0.16];

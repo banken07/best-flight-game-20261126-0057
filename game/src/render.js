@@ -387,13 +387,13 @@ export function drawScene(ctx, world, fx) {
 
     // clouds
     if (island && island.clouds) {
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 0.78;
       for (let i = 0; i < island.clouds.length; i++) {
         const c = island.clouds[i];
         const dx = wrap(c.x + time * 8, -3400, 3400);
         const p = project(cam, dx, c.y, c.z);
         if (!p || p.s <= 0.02) continue;
-        const base = c.rx * p.s;
+        const base = c.rx * p.s * 1.35;
         if (base < 2 || base > 4000) continue;
         const sprite = cloudSprites[i % 3];
         ctx.drawImage(sprite, p.x - base, p.y - base * 0.45, base * 2, base * 0.9);
