@@ -125,6 +125,43 @@ export function heightAt(x, y, seed) {
     const v = lerp(lerp(v00, v10, sx), lerp(v01, v11, sx), sy);
     h += (v - 0.5) * 2 * amps[o];
   }
+  // Multi-octave rolling waves (long wavelengths the 44x44 grid can
+  // represent) + one extra long value-noise octave, masked off the ring
+  // flight path and the drop pads so the autopilot's clearance is
+  // unchanged. Inserted before the beach fade and the runway-corridor
+  // flattening below, so both still zero the waves in the sea/corridor.
+  let wave = 0;
+  const dirs = [[0.83, 0.55], [-0.42, 0.91], [0.97, -0.24]];
+  const wls = [980, 640, 430];
+  const wAmps = [16, 11, 7];
+  for (let w = 0; w < 3; w++) {
+    const dx = dirs[w][0], dy = dirs[w][1];
+    const phase = hash2(w * 7 + 3, 5, seed) * Math.PI * 2;
+    wave += Math.sin(((x * dx + y * dy) / wls[w]) * 2 * Math.PI + phase) * wAmps[w];
+  }
+  {
+    const cell = 520;
+    const ix = Math.floor(x / cell), iy = Math.floor(y / cell);
+    const fx = x / cell - ix, fy = y / cell - iy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const v00 = hash2(ix, iy, seed + 91);
+    const v10 = hash2(ix + 1, iy, seed + 91);
+    const v01 = hash2(ix, iy + 1, seed + 91);
+    const v11 = hash2(ix + 1, iy + 1, seed + 91);
+    const v = lerp(lerp(v00, v10, sx), lerp(v01, v11, sx), sy);
+    wave += (v - 0.5) * 2 * 10;
+  }
+  let mask = 1;
+  if (y >= -1400 && y <= 1200) {
+    const t = (y + 1400) / 2600;
+    const xLine = -300 + 600 * t + Math.sin(2 * Math.PI * t) * 220;
+    mask *= smoothstep(150, 300, Math.abs(x - xLine));
+  }
+  for (let i = 0; i < HUT_SPOTS.length; i++) {
+    const spot = HUT_SPOTS[i];
+    mask *= smoothstep(120, 220, Math.hypot(x - spot.x, y - spot.y));
+  }
+  h += wave * mask;
   if (r > 950 && r < 1150) {
     const t = smoothstep(950, 1150, r);
     h = lerp(h, 0, t);
@@ -149,7 +186,7 @@ export function heightAt(x, y, seed) {
   return clamp(h, -12, 220);
 }
 
-function terrainColorSmooth(h, r, x, y, seed) {
+function terrainColorSmooth(h, r, x, y, seed, slope) {
   let col = "#d8c08a";
   const w1 = smoothstep(3, 16, h);
   col = hexLerp(col, "#79b657", w1);
@@ -163,6 +200,13 @@ function terrainColorSmooth(h, r, x, y, seed) {
   const beachOut = 1 - smoothstep(1100, 1150, r);
   const beachW = beachIn * beachOut * 0.85;
   if (beachW > 0) col = hexLerp(col, "#d8c08a", beachW);
+  // Slope/elevation shading: steep ground goes darker mossy rock, high
+  // steep peaks go pale ridge rock. slope = 1 - normalZ (0 = flat).
+  const steep = smoothstep(0.14, 0.30, slope);
+  const beachOff = 1 - smoothstep(1000, 1150, r);
+  col = hexLerp(col, "#5d5838", steep * beachOff * 0.7);
+  const peak = smoothstep(160, 205, h) * (0.4 + 0.6 * smoothstep(0.10, 0.25, slope));
+  col = hexLerp(col, "#8d867a", peak * 0.6);
   const cs = 260;
   const gx = x / cs, gy = y / cs;
   const ix = Math.floor(gx), iy = Math.floor(gy);
@@ -238,7 +282,8 @@ export function buildIsland(seed) {
       const k = (j * (N + 1) + i) * 3;
       const x = min + i * step, y = min + j * step;
       const h = heights[j * (N + 1) + i];
-      const rgb = hexToRgb(terrainColorSmooth(h, Math.hypot(x, y), x, y, seed));
+      const slope = 1 - normals[k + 2];
+      const rgb = hexToRgb(terrainColorSmooth(h, Math.hypot(x, y), x, y, seed, slope));
       vcolors[k] = rgb[0] / 255;
       vcolors[k + 1] = rgb[1] / 255;
       vcolors[k + 2] = rgb[2] / 255;
