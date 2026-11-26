@@ -41,6 +41,21 @@ function rotZ(p, a) { // heading around world up z
   return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]];
 }
 
+// Rodrigues rotation of point p around the hinge line hingeA -> hingeB
+// by angle (radians, right-hand rule around the axis hingeB - hingeA).
+// Used for the control surfaces: the aileron trailing edge rotates around
+// its leading edge, the elevator trailing edge around its hinge line.
+function rotHinge(p, hingeA, hingeB, angle) {
+  const k = norm([hingeB[0] - hingeA[0], hingeB[1] - hingeA[1], hingeB[2] - hingeA[2]]);
+  const vx = p[0] - hingeA[0], vy = p[1] - hingeA[1], vz = p[2] - hingeA[2];
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const cx = k[1] * vz - k[2] * vy, cy = k[2] * vx - k[0] * vz, cz = k[0] * vy - k[1] * vx;
+  const dot = k[0] * vx + k[1] * vy + k[2] * vz;
+  return [hingeA[0] + vx * c + cx * s + k[0] * dot * (1 - c),
+    hingeA[1] + vy * c + cy * s + k[1] * dot * (1 - c),
+    hingeA[2] + vz * c + cz * s + k[2] * dot * (1 - c)];
+}
+
 function makeXform(jet) {
   const bank = (jet.bankDeg || 0) * Math.PI / 180;
   const pitch = (jet.pitchDeg || 0) * Math.PI / 180;
@@ -253,12 +268,24 @@ export function planeTris(jet) {
     pushQuad(out, xf, rootF, midF, midB, rootB, COL_BELLY);
     // outer tip panel
     pushQuad(out, xf, midF, tipF, tipB, midB, COL_NOSE);
-    // aileron
+    // aileron — deflects with the bank so the plane reads as flying, not
+    // tilted as one rigid piece. Real convention: banking right (bankDeg >
+    // 0) puts the RIGHT aileron UP and the LEFT aileron DOWN. With the
+    // hinge axis root -> tip, a positive Rodrigues angle drops the right
+    // trailing edge and lifts the left one, so the angle is negative when
+    // bankDeg is positive: theta = -(bankDeg/45) * 25deg, same sign both
+    // sides, opposite deflections. 25deg (not 15) so the deflection reads
+    // clearly from the rear chase view — still inside real aileron travel
+    // (up to ~25deg). Driven by jet.bankDeg (the physics value), visual
+    // only — never feeds back into the flight model.
     const aF = [s * 9, -1.6, 0.53];
     const aB = [s * 9, -2.5, 0.53];
     const aF2 = [s * 15.5, -1.6, 1.06];
     const aB2 = [s * 15.5, -2.5, 1.06];
-    pushQuad(out, xf, aF, aF2, aB2, aB, COL_PANEL);
+    const theta = -(jet.bankDeg / 45) * (25 * Math.PI / 180);
+    const aBr = rotHinge(aB, aF, aF2, theta);
+    const aB2r = rotHinge(aB2, aF, aF2, theta);
+    pushQuad(out, xf, aF, aF2, aB2r, aBr, COL_PANEL);
     // flap
     const fF = [s * 1.5, -0.7, 0.16];
     const fB = [s * 1.5, -1.5, 0.16];
@@ -281,13 +308,29 @@ export function planeTris(jet) {
     [15.6, 0.2, 1.1], [16.2, 0.2, 1.1],
     [16.2, 1.0, 1.1], [15.6, 1.0, 1.1], COL_NAV_R);
 
-  // ---- TAIL (swept, tapered stabilizers) ----
-  pushQuad(out, xf,
-    [0.8, -9.5, 0.3], [0.8, -12.5, 0.3],
-    [6.5, -13.0, 0.9], [6.5, -11.2, 0.9], COL_BELLY);
-  pushQuad(out, xf,
-    [-0.8, -9.5, 0.3], [-0.8, -12.5, 0.3],
-    [-6.5, -13.0, 0.9], [-6.5, -11.2, 0.9], COL_BELLY);
+  // ---- TAIL (swept, tapered stabilizers; elevator split off) ----
+  // Each stabilizer is split chordwise at 60% into a fixed front part and
+  // a hinged elevator (trailing 40%). At pitchDeg 0 the two quads tile the
+  // original quad exactly. Pitch up (pitchDeg > 0) lifts BOTH elevator
+  // trailing edges (elevator up = nose up); with the hinge axis
+  // inner -> outer that is eps = -s * pitchRad. Visual only, driven by
+  // jet.pitchDeg — never feeds back into the flight model.
+  function stab(s) {
+    const pitchRad = jet.pitchDeg * Math.PI / 180;
+    const eps = -s * pitchRad;
+    const inLead = [s * 0.8, -9.5, 0.3];
+    const inHinge = [s * 0.8, -11.3, 0.3];
+    const outHinge = [s * 6.5, -12.28, 0.9];
+    const outLead = [s * 6.5, -11.2, 0.9];
+    const inTrail = [s * 0.8, -12.5, 0.3];
+    const outTrail = [s * 6.5, -13.0, 0.9];
+    const inTrailR = rotHinge(inTrail, inHinge, outHinge, eps);
+    const outTrailR = rotHinge(outTrail, inHinge, outHinge, eps);
+    pushQuad(out, xf, inLead, inHinge, outHinge, outLead, COL_BELLY);
+    pushQuad(out, xf, inHinge, inTrailR, outTrailR, outHinge, COL_BELLY);
+  }
+  stab(1);
+  stab(-1);
 
   // fin
   pushQuad(out, xf,

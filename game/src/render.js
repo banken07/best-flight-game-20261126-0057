@@ -116,7 +116,7 @@ function wrap(v, lo, hi) {
 
 // ---- camera lag (camera-only: the jet's physics state is never touched) ----
 // Smooths the camera pitch toward the jet's pitch and rolls the camera with
-// the bank at 30%, so turns feel dynamic instead of locked upright. On
+// the bank at 50%, so turns feel dynamic instead of locked upright. On
 // frozen ?shot= pages dt is 0, so the values snap to the jet (no lag) and
 // only the roll shows; on a world reset (time jumps backwards) it snaps.
 let camSm = null;
@@ -130,7 +130,7 @@ function smoothedCam(jet, time) {
   camSm.pitch += ((jet.pitchDeg || 0) - camSm.pitch) * k;
   camSm.roll += ((jet.bankDeg || 0) - camSm.roll) * k;
   const cam = cameraFor({ x: jet.x, y: jet.y, z: jet.z, headingDeg: jet.headingDeg, pitchDeg: camSm.pitch });
-  const th = (camSm.roll * 0.3) * Math.PI / 180;
+  const th = (camSm.roll * 0.5) * Math.PI / 180;
   const c = Math.cos(th), s = Math.sin(th);
   const rx = cam.rx, ry = cam.ry, rz = cam.rz;
   const ux = cam.ux, uy = cam.uy, uz = cam.uz;
