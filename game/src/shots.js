@@ -120,18 +120,25 @@ export function stageShot(name, world) {
         stepWorld(world, autopilot(world), STEP);
         if (world.stage === 3 || world.phase !== "fly") break;
       }
-      // Fly on until established on final (wings level, heading north,
-      // south of y=-500), then 8 more seconds so the runway is close
-      // enough to fill the lower frame instead of a slit on the horizon.
-      const maxFinal = stepsFor(40);
+      // Fly the final and freeze at photo distance: 400-600 m from the
+      // threshold, wings level, heading north, so the whole runway strip
+      // is visible ahead in the lower frame. The old staging flew 8 s
+      // past "established", ending 134 m from the threshold with the
+      // plane over the runway — the strip sat at the bottom edge of the
+      // frame, hidden behind the fuselage (old shot 3).
+      const maxFinal = stepsFor(60);
       for (let i = 0; i < maxFinal; i++) {
         stepWorld(world, autopilot(world), STEP);
         if (world.phase !== "fly") break;
         const h = world.jet.headingDeg;
         const herr = Math.abs(((h + 180) % 360 + 360) % 360 - 180);
-        if (herr < 15 && world.jet.y < -500) break;
+        const bank = Math.abs(num(world.jet.bankDeg, 0));
+        const distM = -300 - num(world.jet.y, 0);
+        if (herr < 15 && bank < 10 && distM <= 600 && distM >= 400) break;
+        // Safety: never fly on past the threshold — freeze rather than
+        // overshoot the runway entirely.
+        if (distM < 350 && herr < 20) break;
       }
-      runSteps(world, stepsFor(8), true);
       return { screen: world.phase !== "fly" ? world.phase : "play", best: world.score };
     }
     if (name === "score") {

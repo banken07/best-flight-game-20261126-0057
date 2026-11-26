@@ -109,11 +109,17 @@ export function heightAt(x, y, seed) {
   const dRun = Math.abs(x);
   // Runway strip plus a cleared approach corridor to the south (y -1600..300),
   // so the 5.5-degree final stays above the ground all the way to the threshold.
+  // The flat strip is 90 m half-wide, NOT 45: the terrain grid step is ~77 m,
+  // so with a 45 m flat zone the only flat vertices are on the centreline and
+  // the triangles spanning to the next vertices (±77 m) slope steeply up and
+  // BURY the 60 m runway (z=2) under ~35 m of terrain at its edges — the
+  // runway was invisible from the air. At 90 m the ±77 m vertices are flat
+  // and the strip sits on truly level ground.
   const inY = y >= -1600 && y <= 300;
   if (inY) {
-    if (dRun < 45) h = 0;
-    else if (dRun < 90) {
-      const t = smoothstep(45, 90, dRun);
+    if (dRun < 90) h = 0;
+    else if (dRun < 150) {
+      const t = smoothstep(90, 150, dRun);
       h = lerp(0, h, t);
     }
   }
@@ -156,7 +162,14 @@ export function buildIsland(seed) {
       ];
       for (let q = 0; q < 2; q++) {
         const t = quads[q];
-        if (t[0][2] <= 0.5 && t[1][2] <= 0.5 && t[2][2] <= 0.5) continue;
+        const ccx = (t[0][0] + t[1][0] + t[2][0]) / 3;
+        const ccy = (t[0][1] + t[1][1] + t[2][1]) / 3;
+        // Skip only the open sea: low triangles OUTSIDE the island (centre
+        // radius > 1100 m) are water and the 2D sea gradient covers them.
+        // Low triangles on land (the flattened runway corridor, h=0) must
+        // still render as sand — skipping them leaves a hole that shows
+        // the sea gradient under the runway.
+        if (t[0][2] <= 0.5 && t[1][2] <= 0.5 && t[2][2] <= 0.5 && Math.hypot(ccx, ccy) > 1100) continue;
         const cx = (t[0][0] + t[1][0] + t[2][0]) / 3;
         const cy = (t[0][1] + t[1][1] + t[2][1]) / 3;
         const cz = (t[0][2] + t[1][2] + t[2][2]) / 3;
@@ -273,6 +286,14 @@ export function collectIslandTris(island, cam, out) {
     pushTri(out, [x1, y0, z1], [x1, y1, z1], apex, "#a85a32");
     pushTri(out, [x0, y1, z1], [x0, y0, z1], apex, "#a85a32");
   }
+}
+
+// The runway is collected separately from the terrain: it is drawn in its
+// own drawTris pass AFTER the terrain (see render.js), so a terrain
+// triangle can never painter-sort in front of it and bury the strip.
+export function collectRunwayTris(island, cam, out) {
+  if (!island || !cam || !out) return;
+  const ex = cam.ex || 0, ey = cam.ey || 0, ez = cam.ez || 0;
   const rw = island.runway;
   if (rw) {
     const rcx = (rw.x0 + rw.x1) / 2, rcy = (rw.y0 + rw.y1) / 2, rcz = rw.z || 2;

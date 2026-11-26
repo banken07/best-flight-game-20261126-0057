@@ -1,5 +1,5 @@
 import { cameraFor, project, drawTris } from "./gl3d.js";
-import { buildIsland, collectIslandTris } from "./terrain.js";
+import { buildIsland, collectIslandTris, collectRunwayTris } from "./terrain.js";
 import { planeTris, drawRings, drawDropZones } from "./plane3d.js";
 
 let island = null, islandSeed = -1;
@@ -57,12 +57,17 @@ export function drawScene(ctx, world, fx) {
       }
     }
 
-    // 3D tris
+    // 3D tris, in three painter passes so the draw order is guaranteed:
+    // terrain first, runway over the terrain (a terrain triangle can never
+    // bury the strip again), plane last (wheels over the runway).
     const out = [];
     collectIslandTris(island, cam, out);
+    const rwOut = [];
+    collectRunwayTris(island, cam, rwOut);
     const pt = planeTris(jet);
-    for (let i = 0; i < pt.length; i++) out.push(pt[i]);
     drawTris(ctx, cam, out, "#9db4cc");
+    drawTris(ctx, cam, rwOut, "#9db4cc");
+    drawTris(ctx, cam, pt, "#9db4cc");
 
     // clouds
     if (island && island.clouds) {

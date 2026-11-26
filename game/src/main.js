@@ -150,9 +150,13 @@ if (canvas) {
     }
     ctx.clearRect(0, 0, STAGE.width, STAGE.height);
     drawScene(ctx, world, { time: world.elapsed });
+    // Title overlay first, HUD on top of it: the overlay's dark bands
+    // used to be drawn AFTER the HUD and greyed out the top ALT/SPD/HDG
+    // boxes on the title screen. HUD elements sit in the corners and do
+    // not overlap the centred title text.
+    if (screen === "title") drawTitleOverlay();
     const hudScreen = screen === "title" ? "title" : (world.phase === "fly" ? "play" : world.phase);
     drawHud(ctx, world, hudScreen);
-    if (screen === "title") drawTitleOverlay();
     if (paused && screen === "play") {
       ctx.save();
       ctx.textAlign = "center";
